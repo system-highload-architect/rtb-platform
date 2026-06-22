@@ -21,11 +21,14 @@ func NewStore(ttl time.Duration) *Store {
 // Check возвращает true, если ключ ещё не использовался, и регистрирует его.
 // Если ключ уже есть, возвращает false — операцию нужно отклонить.
 func (s *Store) Check(key string) bool {
-	// пытаемся получить — если есть, то дубль
 	if _, ok := s.cache.Get(key); ok {
 		return false
 	}
-	// регистрируем ключ
 	s.cache.Set(key, struct{}{})
 	return true
+}
+
+// Stop завершает работу кэша, останавливая демон и финализаторы.
+func (s *Store) Stop() {
+	s.cache.Stop()
 }
