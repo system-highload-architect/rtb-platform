@@ -1,0 +1,5 @@
+server:
+  port: 9090
+aerospike:
+  host: localhost
+  port: 3000
