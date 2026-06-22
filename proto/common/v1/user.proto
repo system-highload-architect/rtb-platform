@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package common.v1;
+option go_package = "github.com/rtb-platform/pb/common/v1;commonv1";
+
+import "common/v1/money.proto";
+
+// Профиль пользователя для аукциона и аналитики.
+message UserProfile {
+  string device_id = 1;
+  string ip = 2;
+  string user_agent = 3;
+  double lat = 4;
+  double lng = 5;
+  // дополнительные признаки, используемые valuation
+  repeated double features = 6; // вектор признаков для LTV/скоринга
+}

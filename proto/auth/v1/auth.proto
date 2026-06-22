@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package auth.v1;
+option go_package = "github.com/rtb-platform/pb/auth/v1;authv1";
+
+import "google/protobuf/timestamp.proto";
+
+service AuthService {
+  // Регистрация нового пользователя (доступно администратору)
+  rpc Register (RegisterRequest) returns (RegisterResponse);
+  // Вход по email и паролю, возвращает пару токенов
+  rpc Login (LoginRequest) returns (LoginResponse);
+  // Обновление access-токена по refresh-токену
+  rpc Refresh (RefreshRequest) returns (RefreshResponse);
+  // Проверка access-токена
+  rpc Validate (ValidateRequest) returns (ValidateResponse);
+  // Завершение сессии (инвалидация refresh-токена)
+  rpc Logout (LogoutRequest) returns (LogoutResponse);
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string role = 3; // например "admin", "advertiser", "analyst"
+}
+
+message RegisterResponse {
+  string user_id = 1;
+  string error = 2;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3; // секунды до истечения access_token
+  string error = 4;
+}
+
+message RefreshRequest {
+  string refresh_token = 1;
+}
+
+message RefreshResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+  string error = 4;
+}
+
+message ValidateRequest {
+  string access_token = 1;
+}
+
+message ValidateResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string role = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+message LogoutResponse {
+  bool success = 1;
+}

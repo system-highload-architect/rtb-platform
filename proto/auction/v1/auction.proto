@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package auction.v1;
+option go_package = "github.com/rtb-platform/pb/auction/v1;auctionv1";
+
+import "common/v1/money.proto";
+
+service AuctionService {
+  rpc Bid (BidRequest) returns (BidResponse);
+}
+
+message BidRequest {
+  string device_id = 1;
+  string ip = 2;
+  string user_agent = 3;
+  double lat = 4;
+  double lng = 5;
+  repeated string campaign_ids = 6; // если нужно ограничить кампании
+  string idempotency_key = 7;       // для предотвращения дублей
+}
+
+message BidResponse {
+  string campaign_id = 1;
+  common.v1.Money bid_price = 2;     // ставка в копейках
+  string creative_url = 3;
+  // опционально: причина отказа, если аукцион не состоялся
+  string error = 4;
+}

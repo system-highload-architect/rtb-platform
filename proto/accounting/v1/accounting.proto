@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package accounting.v1;
+option go_package = "github.com/rtb-platform/pb/accounting/v1;accountingv1";
+
+import "common/v1/money.proto";
+
+service AccountingService {
+  // Списать средства после выигрыша аукциона
+  rpc Debit (DebitRequest) returns (DebitResponse);
+  // Проверить баланс кампании (опционально)
+  rpc GetBalance (GetBalanceRequest) returns (GetBalanceResponse);
+}
+
+message DebitRequest {
+  string campaign_id = 1;
+  common.v1.Money amount = 2;
+  string bid_id = 3;       // идентификатор аукциона для идемпотентности
+}
+
+message DebitResponse {
+  bool success = 1;
+  common.v1.Money remaining_balance = 2;
+  string error = 3;
+}
+
+message GetBalanceRequest {
+  string campaign_id = 1;
+}
+
+message GetBalanceResponse {
+  common.v1.Money balance = 1;
+}

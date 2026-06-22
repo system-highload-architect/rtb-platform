@@ -1,0 +1,8 @@
+version: v2
+# Каноническая b2b декларация модулей для версии v2
+modules:
+  - path: proto
+# Набор строгих enterprise-правил линтинга
+lint:
+  use:
+    - DEFAULT

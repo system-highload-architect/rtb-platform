@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package analytics.v1;
+option go_package = "github.com/rtb-platform/pb/analytics/v1;analyticsv1";
+
+import "common/v1/money.proto";
+import "common/v1/user.proto";
+
+service AnalyticsService {
+  // Получить агрегированные отчёты
+  rpc GetReport (ReportRequest) returns (stream ReportRow);
+  // Прогноз на основе временного ряда
+  rpc Forecast (ForecastRequest) returns (ForecastResponse);
+  // Факторный анализ (PCA)
+  rpc FactorAnalysis (FactorRequest) returns (FactorResponse);
+}
+
+message ReportRequest {
+  string start_date = 1; // YYYY-MM-DD
+  string end_date = 2;
+  repeated string dimensions = 3; // например: campaign_id, device_type
+  repeated string metrics = 4;    // impressions, clicks, spend
+}
+
+message ReportRow {
+  map<string, string> dimension_values = 1;
+  map<string, double> metric_values = 2;
+}
+
+message ForecastRequest {
+  repeated double history = 1; // временной ряд
+  int32 horizon = 2;
+  // параметры модели (опционально)
+  double alpha = 3;
+  double beta = 4;
+  double gamma = 5;
+  int32 period = 6;
+}
+
+message ForecastResponse {
+  repeated double forecast = 1;
+}
+
+message FactorRequest {
+  repeated common.v1.UserProfile users = 1; // или матрица признаков
+  int32 n_components = 2;
+}
+
+message FactorResponse {
+  repeated double explained_variance_ratio = 1;
+  repeated double loadings = 2; // можно передавать матрицу
+}

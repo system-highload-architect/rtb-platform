@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package common.v1;
+option go_package = "github.com/rtb-platform/pb/common/v1;commonv1";
+
+// Денежная сумма в минимальных единицах (копейки, центы) с фиксированным масштабом.
+message Money {
+  int64 amount = 1; // сумма в минимальных единицах (например, копейки)
+  int32 scale = 2;  // количество знаков после запятой (по умолчанию 2)
+}
