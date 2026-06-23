@@ -78,7 +78,7 @@
 **Методы:**
 - `New[K, V](ttl time.Duration, opts ...Option[K, V]) *Cache[K, V]`
 - Опции: `WithFinalizer(fn func(key K, value V))`, `WithFinalizerWorkers(n int)`, `WithFinalizerBuffer(size int)`, `WithNowFunc(fn func() time.Time)`.
-- `Get(key K) (V, bool)`, `Set(key K, value V)`, `Extend(key K) bool`, `Delete(key K)`, `Stop()`.
+- `Get(key K) (V, bool)`, `Set(key K, value V)`, `Extend(key K) bool`, `Delete(key K)`, `Stop()`, `Values() []V`.
 - Демон засыпает точно до истечения хвоста; при `Get`/`Extend` элемент перемещается в голову.
 
 ---
