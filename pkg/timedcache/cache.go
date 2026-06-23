@@ -170,3 +170,18 @@ func (c *Cache[K, V]) finalizeWorker() {
 		}
 	}
 }
+
+// Values возвращает срез всех значений, находящихся в кэше.
+// Порядок не гарантирован.
+func (c *Cache[K, V]) Values() []V {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	values := make([]V, 0, len(c.items))
+	for _, elem := range c.items {
+		ent, ok := elem.Value.(*entry[K, V])
+		if ok {
+			values = append(values, ent.value)
+		}
+	}
+	return values
+}

@@ -1,0 +1,47 @@
+server:
+  port: 9001
+
+aerospike:
+  hosts:
+    - "127.0.0.1:3000"
+  namespace: "rtb"
+  set: "users"
+
+mongo:
+  uri: "mongodb://localhost:27017"
+  db: "rtb"
+
+scoring:
+  ltv_coeffs: [0.5, 0.2, -0.1, 0.3]
+  ctr: 0.05
+  cvr: 0.1
+  base_conversion_value: 100.0
+  geo_decay: 500.0
+
+fraud:
+  blacklist:
+    - "192.168.1.1"
+    - "deadbeef-device"
+
+log:
+  level: "debug"
+  format: "json"
+
+metrics:
+  use_otlp: false
+
+geoip:
+  database_path: "data/GeoLite2-City.mmdb"
+
+sampler:
+  rate: 0.1
+
+experiments:
+  flags:
+    new_scoring_v2: 0.1
+
+breaker:
+  aerospike_threshold: 3
+  aerospike_timeout: 5s
+  mongo_threshold: 3
+  mongo_timeout: 5s
