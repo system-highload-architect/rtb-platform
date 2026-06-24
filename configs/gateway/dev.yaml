@@ -1,13 +1,14 @@
 server:
-  port: 9090
-  read_timeout: 5s
+  port: 8080
+  read_timeout: 10s
   write_timeout: 10s
   idle_timeout: 30s
 
 grpc:
-  auction: "localhost:50051"
-  accounting: "localhost:50052"
-  analytics: "localhost:50053"
+  auction: "localhost:9001"
+  accounting: "localhost:9002"
+  analytics: "localhost:9003"
+  auth: "localhost:9004"
 
 security:
   rate_limit: 100.0

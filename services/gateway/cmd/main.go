@@ -11,6 +11,7 @@ import (
 	accountingv1 "rtb-platform/pb/accounting/v1"
 	analyticsv1 "rtb-platform/pb/analytics/v1"
 	auctionv1 "rtb-platform/pb/auction/v1"
+	authv1 "rtb-platform/pb/auth/v1"
 	"rtb-platform/pkg/config"
 	"rtb-platform/pkg/idempotent"
 	"rtb-platform/pkg/logger"
@@ -19,6 +20,8 @@ import (
 	"rtb-platform/pkg/shutdown"
 	"rtb-platform/services/gateway/internal/adapters/grpcclient"
 	"rtb-platform/services/gateway/internal/domain"
+	"rtb-platform/services/gateway/internal/handler"
+	"rtb-platform/services/gateway/internal/middleware"
 	"rtb-platform/services/gateway/internal/server"
 
 	"google.golang.org/grpc"
@@ -45,6 +48,7 @@ type GRPCConfig struct {
 	Auction    string `yaml:"auction" env:"GRPC_AUCTION"`
 	Accounting string `yaml:"accounting" env:"GRPC_ACCOUNTING"`
 	Analytics  string `yaml:"analytics" env:"GRPC_ANALYTICS"`
+	Auth       string `yaml:"auth" env:"GRPC_AUTH"`
 }
 
 type SecurityConfig struct {
@@ -117,18 +121,38 @@ func main() {
 	limiter := ratelimit.NewLimiter(cfg.Security.RateLimit, cfg.Security.RateBurst)
 	idempotentStore := idempotent.NewStore(cfg.Security.IdempotencyTTL)
 
-	// 8. Создание HTTP-сервера
+	// После создания analyticsClient
+	authConn, err := grpc.NewClient(cfg.GRPC.Auth, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		logger.Error("cannot connect to auth", "error", err)
+		os.Exit(1)
+	}
+	defer authConn.Close()
+
+	authClient := authv1.NewAuthServiceClient(authConn)
+	authPort := grpcclient.NewAuthPort(authClient, logger)
+
+	// Создаём middleware аутентификации
+	authMiddleware := middleware.NewAuthMiddleware(authPort)
+
+	// Создаём обработчики аналитики
+	analyticsHandler := handler.NewAnalyticsHandler(analyticsPort)
+
+	// Сервер
 	srv := server.NewHTTPServer(
 		server.WithPort(cfg.Server.Port),
 		server.WithLogger(logger),
 		server.WithRateLimiter(limiter),
 		server.WithIdempotentStore(idempotentStore),
 		server.WithJSONRPCService(jsonRPCService),
-		server.WithAnalyticsHandler(analyticsPort),
+		server.WithAnalyticsHandler(analyticsPort),        // для Excel
+		server.WithAnalyticsRESTHandler(analyticsHandler), // для REST API
+		server.WithAuthMiddleware(authMiddleware),
 		server.WithReadTimeout(cfg.Server.ReadTimeout),
 		server.WithWriteTimeout(cfg.Server.WriteTimeout),
 		server.WithIdleTimeout(cfg.Server.IdleTimeout),
 	)
+
 	srv.Handle("/metrics", metrics.Handler())
 
 	// 9. Graceful shutdown

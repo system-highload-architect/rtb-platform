@@ -17,6 +17,8 @@ import (
 	"rtb-platform/pkg/zerocopy"
 
 	"rtb-platform/services/gateway/internal/domain"
+	"rtb-platform/services/gateway/internal/handler"
+	"rtb-platform/services/gateway/internal/middleware"
 	"rtb-platform/services/gateway/internal/ports"
 )
 
@@ -27,7 +29,9 @@ type HTTPServer struct {
 	limiter         *ratelimit.Limiter
 	idempotentStore *idempotent.Store
 	jsonRPCService  *domain.JSONRPCService
-	analyticsPort   ports.AnalyticsPort
+	analyticsPort   ports.AnalyticsPort       // для Excel и отчётов через порт (уже есть)
+	analyticsREST   *handler.AnalyticsHandler // новый REST‑обработчик
+	authMiddleware  *middleware.AuthMiddleware
 	allowedHosts    []string
 	port            int
 	readTimeout     time.Duration
@@ -84,7 +88,14 @@ func WithIdleTimeout(d time.Duration) Option {
 	return func(s *HTTPServer) { s.idleTimeout = d }
 }
 
-// NewHTTPServer создаёт экземпляр сервера с применёнными опциями.
+func WithAuthMiddleware(am *middleware.AuthMiddleware) Option {
+	return func(s *HTTPServer) { s.authMiddleware = am }
+}
+
+func WithAnalyticsRESTHandler(ah *handler.AnalyticsHandler) Option {
+	return func(s *HTTPServer) { s.analyticsREST = ah }
+}
+
 func NewHTTPServer(opts ...Option) *HTTPServer {
 	s := &HTTPServer{
 		allowedHosts: []string{"localhost", "127.0.0.1"},
@@ -94,11 +105,25 @@ func NewHTTPServer(opts ...Option) *HTTPServer {
 	}
 
 	mux := http.NewServeMux()
-	s.mux = mux // сохраняем для метода Handle
+	s.mux = mux
+
+	// JSON-RPC (без аутентификации, если не требуется)
 	mux.HandleFunc("/rpc", s.handleRPC)
+
+	// Аутентифицированные аналитические маршруты, если REST‑обработчик задан
+	if s.analyticsREST != nil && s.authMiddleware != nil {
+		// Аналитические эндпоинты с аутентификацией
+		auth := s.authMiddleware.Handler
+		mux.Handle("/api/report", auth(http.HandlerFunc(s.analyticsREST.Report)))
+		mux.Handle("/api/forecast", auth(http.HandlerFunc(s.analyticsREST.Forecast)))
+		mux.Handle("/api/factor-analysis", auth(http.HandlerFunc(s.analyticsREST.FactorAnalysis)))
+	}
+
+	// Экспорт Excel (может требовать или не требовать аутентификации, на ваше усмотрение)
 	mux.HandleFunc("/export/report", s.handleExportReport)
 
-	handler := s.rateLimitMiddleware(s.idempotentMiddleware(mux))
+	// CORS (можно добавить простой middleware)
+	handler := corsMiddleware(s.rateLimitMiddleware(s.idempotentMiddleware(mux)))
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
 		Handler:      handler,
@@ -107,6 +132,20 @@ func NewHTTPServer(opts ...Option) *HTTPServer {
 		IdleTimeout:  s.idleTimeout,
 	}
 	return s
+}
+
+// corsMiddleware простая реализация
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Handle регистрирует дополнительный обработчик (например, /metrics).

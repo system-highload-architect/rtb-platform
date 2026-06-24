@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	analyticsv1 "rtb-platform/pb/analytics/v1"
+
 	"rtb-platform/services/gateway/internal/ports"
 
 	"github.com/xuri/excelize/v2"
@@ -84,4 +85,21 @@ func (a *analyticsAdapter) ExportExcel(ctx context.Context, req *analyticsv1.Rep
 func cellName(row, col int) string {
 	colName, _ := excelize.ColumnNumberToName(col)
 	return colName + fmt.Sprint(row)
+}
+func (a *analyticsAdapter) Forecast(ctx context.Context, req *analyticsv1.ForecastRequest) (*analyticsv1.ForecastResponse, error) {
+	resp, err := a.client.Forecast(ctx, req)
+	if err != nil {
+		a.logger.Error("analytics forecast failed", "error", err)
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (a *analyticsAdapter) FactorAnalysis(ctx context.Context, req *analyticsv1.FactorRequest) (*analyticsv1.FactorResponse, error) {
+	resp, err := a.client.FactorAnalysis(ctx, req)
+	if err != nil {
+		a.logger.Error("analytics factor analysis failed", "error", err)
+		return nil, err
+	}
+	return resp, nil
 }
