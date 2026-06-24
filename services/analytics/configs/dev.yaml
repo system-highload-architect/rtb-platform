@@ -1,0 +1,9 @@
+server:
+  port: 9003
+
+log:
+  level: "debug"
+  format: "json"
+
+metrics:
+  use_otlp: false

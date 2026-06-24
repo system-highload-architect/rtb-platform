@@ -151,7 +151,7 @@ func main() {
 	userRepo := aerospike.NewUserRepo(aeroClient, cfg.Aerospike.Namespace, cfg.Aerospike.Set, aeroBreaker)
 
 	// Campaign cache (in-memory)
-	campaignTTL := 5 * time.Minute
+	campaignTTL := 24 * time.Hour // чтобы не истекали во время тестов
 	campaignCache := mongodb.NewCachedCampaignRepo(campaignTTL, mongoBreaker)
 
 	// Временная загрузка тестовых кампаний (уберем после реализации MongoDB)

@@ -11,13 +11,14 @@ import (
 	accountingv1 "rtb-platform/pb/accounting/v1"
 	analyticsv1 "rtb-platform/pb/analytics/v1"
 	auctionv1 "rtb-platform/pb/auction/v1"
-	authv1 "rtb-platform/pb/auth/v1"
+
 	"rtb-platform/pkg/config"
 	"rtb-platform/pkg/idempotent"
 	"rtb-platform/pkg/logger"
 	"rtb-platform/pkg/metrics"
 	"rtb-platform/pkg/ratelimit"
 	"rtb-platform/pkg/shutdown"
+
 	"rtb-platform/services/gateway/internal/adapters/grpcclient"
 	"rtb-platform/services/gateway/internal/domain"
 	"rtb-platform/services/gateway/internal/handler"
@@ -129,11 +130,11 @@ func main() {
 	}
 	defer authConn.Close()
 
-	authClient := authv1.NewAuthServiceClient(authConn)
-	authPort := grpcclient.NewAuthPort(authClient, logger)
+	// authClient := authv1.NewAuthServiceClient(authConn)
+	// authPort := grpcclient.NewAuthPort(authClient, logger)
 
 	// Создаём middleware аутентификации
-	authMiddleware := middleware.NewAuthMiddleware(authPort)
+	authMiddleware := middleware.NewAuthMiddleware(nil) //authPort)
 
 	// Создаём обработчики аналитики
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsPort)

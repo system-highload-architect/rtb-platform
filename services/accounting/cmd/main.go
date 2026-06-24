@@ -61,9 +61,10 @@ func main() {
 	// In-memory хранилище
 	store := domain.NewInmemStore()
 
-	// Добавим тестовые кампании
+	// TODO Добавим тестовые кампании (заглушка)
 	store.Set("campaign-1", fixedpoint.Money(10000)) // 100.00 руб
-	store.Set("campaign-2", fixedpoint.Money(5000))  //  50.00 руб
+	store.Set("1001", fixedpoint.Money(100000))      // 1000.00 руб
+	store.Set("1002", fixedpoint.Money(50000))       // 500.00 руб
 
 	idempStore := idempotent.NewStore(cfg.Idempotency.TTL)
 
