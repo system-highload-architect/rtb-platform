@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	accountingv1 "rtb-platform/pb/accounting/v1"
 	auctionv1 "rtb-platform/pb/auction/v1"
 
 	"rtb-platform/pkg/breaker"
@@ -24,6 +25,7 @@ import (
 	"rtb-platform/services/auction/internal/adapters/aerospike"
 	"rtb-platform/services/auction/internal/adapters/fraud"
 	"rtb-platform/services/auction/internal/adapters/geodata"
+	"rtb-platform/services/auction/internal/adapters/grpcclient"
 	"rtb-platform/services/auction/internal/adapters/kafka"
 	"rtb-platform/services/auction/internal/adapters/mongodb"
 	"rtb-platform/services/auction/internal/domain"
@@ -33,6 +35,7 @@ import (
 	as "github.com/aerospike/aerospike-client-go/v7"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type AppConfig struct {
@@ -47,6 +50,11 @@ type AppConfig struct {
 	Sampler     SamplerConfig     `yaml:"sampler"`
 	Experiments ExperimentsConfig `yaml:"experiments"`
 	Breaker     BreakerConfig     `yaml:"breaker"`
+	GRPC        GRPCConfig        `yaml:"grpc"`
+}
+
+type GRPCConfig struct {
+	Accounting string `yaml:"accounting" env:"GRPC_ACCOUNTING"`
 }
 
 type ServerConfig struct {
@@ -146,11 +154,11 @@ func main() {
 	campaignTTL := 5 * time.Minute
 	campaignCache := mongodb.NewCachedCampaignRepo(campaignTTL, mongoBreaker)
 
-	// --- Временная загрузка тестовых кампаний ---
+	// Временная загрузка тестовых кампаний (уберем после реализации MongoDB)
 	testCampaigns := []domain.Campaign{
 		{
 			ID:           1001,
-			BidCents:     150, // ставка 1.50 руб
+			BidCents:     150,
 			DailyBudget:  fixedpoint.NewFromInt64(10000),
 			CreativeURL:  "https://cdn.example.com/creatives/1001.jpg",
 			BillboardLat: 55.7600,
@@ -158,14 +166,13 @@ func main() {
 		},
 		{
 			ID:           1002,
-			BidCents:     200, // ставка 2.00 руб
+			BidCents:     200,
 			DailyBudget:  fixedpoint.NewFromInt64(5000),
 			CreativeURL:  "https://cdn.example.com/creatives/1002.jpg",
 			BillboardLat: 55.7500,
 			BillboardLng: 37.6100,
 		},
 	}
-
 	campaignCache.Update(testCampaigns)
 
 	// Fraud detector
@@ -199,6 +206,16 @@ func main() {
 
 	// gRPC-сервер
 	grpcServer := grpc.NewServer()
+	// Accounting gRPC client
+	accountingConn, err := grpc.NewClient(cfg.GRPC.Accounting, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		appLogger.Error("cannot connect to accounting", "error", err)
+		os.Exit(1)
+	}
+	defer accountingConn.Close()
+	accountingClient := accountingv1.NewAccountingServiceClient(accountingConn)
+	accountingPort := grpcclient.NewAccountingPort(accountingClient, appLogger)
+
 	auctionSrv := server.NewAuctionServer(
 		userRepo,
 		campaignCache,
@@ -212,6 +229,7 @@ func main() {
 		geoipDB,
 		samplerInstance,
 		experiments,
+		accountingPort,
 	)
 	auctionv1.RegisterAuctionServiceServer(grpcServer, auctionSrv)
 

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strconv"
 
+	accountingv1 "rtb-platform/pb/accounting/v1"
 	auctionv1 "rtb-platform/pb/auction/v1"
 	commonv1 "rtb-platform/pb/common/v1"
 
@@ -24,18 +25,19 @@ import (
 
 type AuctionServer struct {
 	auctionv1.UnimplementedAuctionServiceServer
-	userRepo     ports.UserProfileRepo
-	campaignRepo ports.CampaignRepo
-	fraud        ports.FraudDetector
-	geoResolver  domain.GeoResolver
-	scorer       scoring.Scorer
-	altScorer    scoring.Scorer
-	publisher    ports.EventPublisher
-	idempotent   *idempotent.Store
-	log          *slog.Logger
-	geoipDB      *geoip.GeoDB
-	sampler      *sampler.Sampler
-	experiments  *experiment.Experiments
+	userRepo         ports.UserProfileRepo
+	campaignRepo     ports.CampaignRepo
+	fraud            ports.FraudDetector
+	geoResolver      domain.GeoResolver
+	scorer           scoring.Scorer
+	altScorer        scoring.Scorer
+	publisher        ports.EventPublisher
+	idempotent       *idempotent.Store
+	log              *slog.Logger
+	geoipDB          *geoip.GeoDB
+	sampler          *sampler.Sampler
+	experiments      *experiment.Experiments
+	accountingClient ports.AccountingPort
 }
 
 func NewAuctionServer(
@@ -51,20 +53,22 @@ func NewAuctionServer(
 	geoipDB *geoip.GeoDB,
 	sampler *sampler.Sampler,
 	experiments *experiment.Experiments,
+	accountingPort ports.AccountingPort,
 ) *AuctionServer {
 	return &AuctionServer{
-		userRepo:     userRepo,
-		campaignRepo: campaignRepo,
-		fraud:        fraud,
-		geoResolver:  geoResolver,
-		scorer:       scorer,
-		altScorer:    altScorer,
-		publisher:    publisher,
-		idempotent:   idemp,
-		log:          log,
-		geoipDB:      geoipDB,
-		sampler:      sampler,
-		experiments:  experiments,
+		userRepo:         userRepo,
+		campaignRepo:     campaignRepo,
+		fraud:            fraud,
+		geoResolver:      geoResolver,
+		scorer:           scorer,
+		altScorer:        altScorer,
+		publisher:        publisher,
+		idempotent:       idemp,
+		log:              log,
+		geoipDB:          geoipDB,
+		sampler:          sampler,
+		experiments:      experiments,
+		accountingClient: accountingPort,
 	}
 }
 
@@ -134,6 +138,23 @@ func (s *AuctionServer) Bid(ctx context.Context, req *auctionv1.BidRequest) (*au
 	}
 	if result == nil {
 		return &auctionv1.BidResponse{Error: "no suitable campaign"}, nil
+	}
+	// Списываем бюджет, если есть победитель и accountingClient настроен
+	if result != nil && result.Error == "" && s.accountingClient != nil {
+		debitReq := &accountingv1.DebitRequest{
+			CampaignId: strconv.FormatUint(uint64(result.CampaignID), 10),
+			Amount:     &commonv1.Money{Amount: result.BidPrice, Scale: 2},
+			BidId:      req.IdempotencyKey,
+		}
+		debitResp, err := s.accountingClient.Debit(ctx, debitReq)
+		if err != nil || !debitResp.Success {
+			s.log.Error("failed to debit campaign", "error", err)
+			// TODO:
+			// Если списание не удалось, можно вернуть ошибку или продолжить без списания
+			// Здесь решаем: если бюджет не списался, аукцион всё равно возвращает победителя,
+			// но в реальной системе можно откатить результат.
+			// Пока просто логируем и продолжаем.
+		}
 	}
 
 	// Публикация события с сэмплированием

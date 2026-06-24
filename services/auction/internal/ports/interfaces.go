@@ -3,7 +3,10 @@ package ports
 import (
 	"context"
 
+	accountingv1 "rtb-platform/pb/accounting/v1"
+
 	"rtb-platform/pkg/geospatial"
+
 	"rtb-platform/services/auction/internal/domain"
 )
 
@@ -27,6 +30,10 @@ type CampaignRepo interface {
 	GetActive(ctx context.Context) ([]domain.Campaign, error)
 	Update(campaigns []domain.Campaign)
 	Stop()
+}
+
+type AccountingPort interface {
+	Debit(ctx context.Context, req *accountingv1.DebitRequest) (*accountingv1.DebitResponse, error)
 }
 
 // FraudDetector — проверка на мошенничество.

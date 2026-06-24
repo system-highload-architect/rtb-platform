@@ -111,7 +111,10 @@ func (c *Cache[K, V]) Extend(key K) bool {
 	if !ok {
 		return false
 	}
-	ent := elem.Value.(*entry[K, V])
+	ent, ok := elem.Value.(*entry[K, V])
+	if !ok {
+		return false
+	}
 	now := c.now()
 	if now.After(ent.expiresAt) {
 		c.removeElement(elem)

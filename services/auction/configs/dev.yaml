@@ -45,3 +45,6 @@ breaker:
   aerospike_timeout: 5s
   mongo_threshold: 3
   mongo_timeout: 5s
+
+grpc:
+  accounting: "localhost:9002"
