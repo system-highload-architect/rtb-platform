@@ -25,6 +25,7 @@ type UserProfile struct {
 // CampaignRepo — хранилище активных кампаний.
 type CampaignRepo interface {
 	GetActive(ctx context.Context) ([]domain.Campaign, error)
+	Update(campaigns []domain.Campaign)
 	Stop()
 }
 

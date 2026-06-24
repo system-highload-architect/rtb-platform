@@ -16,7 +16,6 @@ type userRepo struct {
 	breaker *breaker.Breaker
 }
 
-// NewUserRepo создаёт репозиторий с circuit breaker.
 func NewUserRepo(client *as.Client, namespace, set string, cb *breaker.Breaker) ports.UserProfileRepo {
 	return &userRepo{
 		client:  client,
@@ -29,6 +28,11 @@ func NewUserRepo(client *as.Client, namespace, set string, cb *breaker.Breaker) 
 func (r *userRepo) Get(ctx context.Context, deviceID string) (*ports.UserProfile, error) {
 	var profile *ports.UserProfile
 	err := r.breaker.Execute(ctx, func() error {
+		if r.client == nil {
+			// Заглушка, если клиент не инициализирован
+			profile = &ports.UserProfile{DeviceID: deviceID}
+			return nil
+		}
 		key, err := as.NewKey(r.ns, r.set, deviceID)
 		if err != nil {
 			return err
@@ -37,8 +41,8 @@ func (r *userRepo) Get(ctx context.Context, deviceID string) (*ports.UserProfile
 		if err != nil {
 			return err
 		}
-		// TODO: маппинг rec.Bins в UserProfile
 		_ = rec
+		// TODO: маппинг rec.Bins -> ports.UserProfile
 		profile = &ports.UserProfile{DeviceID: deviceID}
 		return nil
 	})

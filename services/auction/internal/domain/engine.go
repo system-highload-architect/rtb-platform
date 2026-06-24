@@ -5,6 +5,7 @@ import (
 
 	"rtb-platform/pkg/geospatial"
 	"rtb-platform/pkg/statistics"
+
 	"rtb-platform/services/auction/internal/domain/scoring"
 )
 
@@ -60,7 +61,7 @@ func RunAuction(
 	winnerIdx := indices[len(indices)-1]
 	winner := candidates[winnerIdx]
 
-	// Сбор статистик
+	// Статистики для мониторинга (при желании можно залогировать или отправить в метрики)
 	if len(bids) > 0 {
 		bidsFloat := make([]float64, len(bids))
 		for i, v := range bids {
@@ -68,7 +69,6 @@ func RunAuction(
 		}
 		_ = statistics.Median(bidsFloat)
 		_ = statistics.Percentile(bidsFloat, 0.9)
-		// можно залогировать или передать в метрики
 	}
 
 	return &BidResponse{

@@ -60,7 +60,17 @@ func (s *JSONRPCService) registerHandlers(auction ports.AuctionPort, accounting 
 		return resp, nil
 	})
 
-	// При необходимости можно добавить accounting.getBalance, analytics.getReport и т.д.
+	s.registry.Register("accounting.getBalance", func(ctx context.Context, raw json.RawMessage) (proto.Message, error) {
+		var req accountingv1.GetBalanceRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, fmt.Errorf("invalid getBalance request: %w", err)
+		}
+		resp, err := accounting.GetBalance(ctx, &req)
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
+	})
 }
 
 func (s *JSONRPCService) Dispatch(ctx context.Context, method string, params json.RawMessage) (proto.Message, error) {

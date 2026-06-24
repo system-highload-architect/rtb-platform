@@ -1,0 +1,12 @@
+server:
+  port: 9002
+
+log:
+  level: "debug"
+  format: "json"
+
+metrics:
+  use_otlp: false
+
+idempotency:
+  ttl: 5m

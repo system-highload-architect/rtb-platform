@@ -9,24 +9,29 @@ import (
 	"time"
 
 	auctionv1 "rtb-platform/pb/auction/v1"
+
 	"rtb-platform/pkg/breaker"
 	"rtb-platform/pkg/config"
 	"rtb-platform/pkg/experiment"
+	"rtb-platform/pkg/fixedpoint"
 	"rtb-platform/pkg/geoip"
 	"rtb-platform/pkg/idempotent"
 	"rtb-platform/pkg/logger"
 	"rtb-platform/pkg/metrics"
 	"rtb-platform/pkg/sampler"
 	"rtb-platform/pkg/shutdown"
+
 	"rtb-platform/services/auction/internal/adapters/aerospike"
 	"rtb-platform/services/auction/internal/adapters/fraud"
 	"rtb-platform/services/auction/internal/adapters/geodata"
 	"rtb-platform/services/auction/internal/adapters/kafka"
 	"rtb-platform/services/auction/internal/adapters/mongodb"
+	"rtb-platform/services/auction/internal/domain"
 	"rtb-platform/services/auction/internal/domain/scoring"
 	"rtb-platform/services/auction/internal/server"
 
 	as "github.com/aerospike/aerospike-client-go/v7"
+
 	"google.golang.org/grpc"
 )
 
@@ -105,13 +110,18 @@ func main() {
 	}
 	defer metrics.Shutdown(context.Background())
 
-	// GeoIP
-	geoipDB, err := geoip.New(cfg.GeoIP.DatabasePath)
-	if err != nil {
-		appLogger.Error("failed to load geoip db", "error", err)
-		os.Exit(1)
+	// GeoIP (опционально, если файл существует)
+	var geoipDB *geoip.GeoDB
+	if cfg.GeoIP.DatabasePath != "" {
+		var err error
+		geoipDB, err = geoip.New(cfg.GeoIP.DatabasePath)
+		if err != nil {
+			appLogger.Error("failed to load geoip db, continuing without GeoIP", "error", err)
+			geoipDB = nil
+		} else {
+			defer geoipDB.Close()
+		}
 	}
-	defer geoipDB.Close()
 
 	// Sampler
 	samplerInstance := sampler.NewSampler(cfg.Sampler.Rate)
@@ -123,21 +133,48 @@ func main() {
 	aeroBreaker := breaker.New("aerospike", cfg.Breaker.AerospikeThreshold, cfg.Breaker.AerospikeTimeout)
 	mongoBreaker := breaker.New("mongo", cfg.Breaker.MongoThreshold, cfg.Breaker.MongoTimeout)
 
-	// Aerospike client (пока nil)
+	// Инициализация клиента Aerospike (пока можно использовать nil, если Aerospike не запущен)
 	var aeroClient *as.Client = nil
+	// В реальном коде:
+	// clientPolicy := as.NewClientPolicy()
+	// aeroClient, err := as.NewClientWithPolicyAndHost(clientPolicy, as.NewHosts(cfg.Aerospike.Hosts...)...)
+	// if err != nil { ... }
+
 	userRepo := aerospike.NewUserRepo(aeroClient, cfg.Aerospike.Namespace, cfg.Aerospike.Set, aeroBreaker)
 
-	// Campaign cache
+	// Campaign cache (in-memory)
 	campaignTTL := 5 * time.Minute
 	campaignCache := mongodb.NewCachedCampaignRepo(campaignTTL, mongoBreaker)
+
+	// --- Временная загрузка тестовых кампаний ---
+	testCampaigns := []domain.Campaign{
+		{
+			ID:           1001,
+			BidCents:     150, // ставка 1.50 руб
+			DailyBudget:  fixedpoint.NewFromInt64(10000),
+			CreativeURL:  "https://cdn.example.com/creatives/1001.jpg",
+			BillboardLat: 55.7600,
+			BillboardLng: 37.6200,
+		},
+		{
+			ID:           1002,
+			BidCents:     200, // ставка 2.00 руб
+			DailyBudget:  fixedpoint.NewFromInt64(5000),
+			CreativeURL:  "https://cdn.example.com/creatives/1002.jpg",
+			BillboardLat: 55.7500,
+			BillboardLng: 37.6100,
+		},
+	}
+
+	campaignCache.Update(testCampaigns)
 
 	// Fraud detector
 	fraudDetector := fraud.NewInmemDetector(cfg.Fraud.Blacklist)
 
-	// Geo resolver
+	// Geo resolver (пока заглушка с пустыми координатами)
 	geoResolver := geodata.NewInmemGeoResolver(nil)
 
-	// Publisher
+	// Publisher (заглушка)
 	publisher := kafka.NewDummyPublisher()
 
 	// Основной скорер
@@ -149,7 +186,7 @@ func main() {
 		cfg.Scoring.GeoDecay,
 	)
 
-	// Альтернативный скорер (для A/B) – можно другие коэффициенты
+	// Альтернативный скорер для A/B-теста (немного другие параметры)
 	altScorer := scoring.NewPredictiveScorer(
 		cfg.Scoring.LTVCoeffs,
 		cfg.Scoring.CTR*1.1,
@@ -160,6 +197,7 @@ func main() {
 
 	idempStore := idempotent.NewStore(5 * time.Minute)
 
+	// gRPC-сервер
 	grpcServer := grpc.NewServer()
 	auctionSrv := server.NewAuctionServer(
 		userRepo,
@@ -191,6 +229,7 @@ func main() {
 		}
 	}()
 
+	// Graceful shutdown
 	shutdownMgr := shutdown.NewManager(30 * time.Second)
 	shutdownMgr.Add("grpc", 0, func(ctx context.Context) error {
 		grpcServer.GracefulStop()

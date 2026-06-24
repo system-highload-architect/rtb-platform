@@ -69,7 +69,7 @@ type MetricsConfig struct {
 func main() {
 	// 1. Загрузка конфигурации
 	var cfg AppConfig
-	if err := config.Load(&cfg, config.WithPath("../../../configs/gateway/dev.yaml")); err != nil {
+	if err := config.Load(&cfg, config.WithPath("configs/dev.yaml")); err != nil {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
@@ -138,12 +138,17 @@ func main() {
 	// Создаём обработчики аналитики
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsPort)
 
+	rateLimitMW := middleware.NewRateLimitMiddleware(limiter)
+	idempotentMW := middleware.NewIdempotentMiddleware(idempotentStore)
+	appsecMW := middleware.NewAppsecMiddleware([]string{"localhost", "127.0.0.1", "localhost:8080"})
+
 	// Сервер
 	srv := server.NewHTTPServer(
 		server.WithPort(cfg.Server.Port),
 		server.WithLogger(logger),
-		server.WithRateLimiter(limiter),
-		server.WithIdempotentStore(idempotentStore),
+		server.WithRateLimitMiddleware(rateLimitMW),
+		server.WithIdempotentMiddleware(idempotentMW),
+		server.WithAppsecMiddleware(appsecMW),
 		server.WithJSONRPCService(jsonRPCService),
 		server.WithAnalyticsHandler(analyticsPort),        // для Excel
 		server.WithAnalyticsRESTHandler(analyticsHandler), // для REST API
