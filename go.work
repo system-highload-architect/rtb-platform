@@ -1,0 +1,11 @@
+go 1.25.0
+
+use (
+	./pb
+	./pkg
+	./services/accounting
+	./services/analytics
+	./services/auction
+	./services/auth
+	./services/gateway
+)

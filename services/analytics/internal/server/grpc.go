@@ -79,17 +79,14 @@ func (s *AnalyticsServer) Forecast(ctx context.Context, req *analyticsv1.Forecas
 		req.Gamma = 0.2
 	}
 	if req.Period == 0 {
-		req.Period = 4
+		req.Period = 4 // для 15 значений хватит
 	}
-
-	params := timeseries.HoltWintersParams{
+	forecast, err := s.forecastSvc.Forecast(ctx, req.History, int(req.Horizon), timeseries.HoltWintersParams{
 		Alpha:  req.Alpha,
 		Beta:   req.Beta,
 		Gamma:  req.Gamma,
 		Period: int(req.Period),
-	}
-
-	forecast, err := s.forecastSvc.Forecast(ctx, req.History, int(req.Horizon), params)
+	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "forecast error: %v", err)
 	}

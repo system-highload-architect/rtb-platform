@@ -57,6 +57,30 @@ func main() {
 
 	store := eventstore.NewMemoryStore()
 	// Можно заполнить тестовыми событиями для проверки GetReport (опционально)
+	// Генерация тестовых событий за последние 7 дней
+	now := time.Now()
+	for daysAgo := 7; daysAgo >= 0; daysAgo-- {
+		eventDate := now.AddDate(0, 0, -daysAgo)
+		for hour := 0; hour < 24; hour += 6 { // 4 события в день
+			for _, camp := range []uint32{1001, 1002} {
+				price := int64(150)
+				if camp == 1002 {
+					price = 200
+				}
+				store.Add(domain.Event{
+					BidID:         fmt.Sprintf("bid-%d-%d-%d", camp, daysAgo, hour),
+					CampaignID:    camp,
+					DeviceID:      fmt.Sprintf("device-%d", (daysAgo*hour)%5),
+					PriceCents:    price,
+					Win:           true,
+					LtvScore:      0.5 + float64(hour%3)*0.2,
+					GeoFactor:     0.8 + float64(daysAgo%3)*0.1,
+					ImpressionVal: float64(price) * 0.8,
+					Timestamp:     eventDate.Add(time.Duration(hour) * time.Hour),
+				})
+			}
+		}
+	}
 
 	reportSvc := domain.NewReportService(store)
 	forecastSvc := domain.NewForecastService()

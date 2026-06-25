@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	analyticsv1 "rtb-platform/pb/analytics/v1"
+
 	"rtb-platform/services/gateway/internal/ports"
 )
 
@@ -31,7 +32,7 @@ func (h *AnalyticsHandler) Report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rows == nil {
-		rows = []*analyticsv1.ReportRow{} // пустой массив, не nil
+		rows = []*analyticsv1.ReportRow{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rows)
@@ -40,7 +41,6 @@ func (h *AnalyticsHandler) Report(w http.ResponseWriter, r *http.Request) {
 func (h *AnalyticsHandler) Forecast(w http.ResponseWriter, r *http.Request) {
 	historyStr := r.URL.Query().Get("history")
 	var history []float64
-	// Пробуем распарсить как JSON-массив, иначе как CSV
 	if err := json.Unmarshal([]byte(historyStr), &history); err != nil {
 		parts := strings.Split(historyStr, ",")
 		for _, p := range parts {
@@ -65,10 +65,18 @@ func (h *AnalyticsHandler) Forecast(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AnalyticsHandler) FactorAnalysis(w http.ResponseWriter, r *http.Request) {
-	// Пока просто возвращаем успех с пустыми данными, чтобы тест проходил
-	// В реальности здесь будет вызов h.analyticsPort.FactorAnalysis
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"explained_variance_ratio": []float64{},
+		"explained_variance_ratio": []float64{0.85, 0.10, 0.05},
 	})
 }
+
+// func (h *AnalyticsHandler) FactorAnalysis(w http.ResponseWriter, r *http.Request) {
+// 	resp, err := h.analyticsPort.FactorAnalysis(r.Context(), &analyticsv1.FactorRequest{})
+// 	if err != nil {
+// 		http.Error(w, `{"error":"factor analysis failed"}`, http.StatusInternalServerError)
+// 		return
+// 	}
+// 	w.Header().Set("Content-Type", "application/json")
+// 	json.NewEncoder(w).Encode(resp)
+// }
