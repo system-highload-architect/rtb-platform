@@ -11,6 +11,7 @@ import (
 	accountingv1 "rtb-platform/pb/accounting/v1"
 	analyticsv1 "rtb-platform/pb/analytics/v1"
 	auctionv1 "rtb-platform/pb/auction/v1"
+	authv1 "rtb-platform/pb/auth/v1"
 
 	"rtb-platform/pkg/config"
 	"rtb-platform/pkg/idempotent"
@@ -115,13 +116,6 @@ func main() {
 	accountingPort := grpcclient.NewAccountingPort(accountingClient, logger)
 	analyticsPort := grpcclient.NewAnalyticsPort(analyticsClient, logger)
 
-	// 6. Доменная логика (обработчики JSON-RPC)
-	jsonRPCService := domain.NewJSONRPCService(auctionPort, accountingPort, analyticsPort, logger)
-
-	// 7. Инфраструктурные компоненты
-	limiter := ratelimit.NewLimiter(cfg.Security.RateLimit, cfg.Security.RateBurst)
-	idempotentStore := idempotent.NewStore(cfg.Security.IdempotencyTTL)
-
 	// После создания analyticsClient
 	authConn, err := grpc.NewClient(cfg.GRPC.Auth, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -130,11 +124,18 @@ func main() {
 	}
 	defer authConn.Close()
 
-	// authClient := authv1.NewAuthServiceClient(authConn)
-	// authPort := grpcclient.NewAuthPort(authClient, logger)
+	authClient := authv1.NewAuthServiceClient(authConn)
+	authPort := grpcclient.NewAuthPort(authClient, logger)
 
 	// Создаём middleware аутентификации
-	authMiddleware := middleware.NewAuthMiddleware(nil) //authPort)
+	authMiddleware := middleware.NewAuthMiddleware(authPort)
+
+	// 6. Доменная логика (обработчики JSON-RPC)
+	jsonRPCService := domain.NewJSONRPCService(auctionPort, accountingPort, analyticsPort, authPort, logger)
+
+	// 7. Инфраструктурные компоненты
+	limiter := ratelimit.NewLimiter(cfg.Security.RateLimit, cfg.Security.RateBurst)
+	idempotentStore := idempotent.NewStore(cfg.Security.IdempotencyTTL)
 
 	// Создаём обработчики аналитики
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsPort)

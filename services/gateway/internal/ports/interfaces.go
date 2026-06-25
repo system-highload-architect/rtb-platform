@@ -27,4 +27,6 @@ type AnalyticsPort interface {
 
 type AuthPort interface {
 	Validate(ctx context.Context, token string) (*authv1.ValidateResponse, error)
+	Register(ctx context.Context, req *authv1.RegisterRequest) (*authv1.RegisterResponse, error)
+	Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.LoginResponse, error)
 }

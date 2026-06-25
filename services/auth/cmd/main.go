@@ -64,7 +64,7 @@ func main() {
 	store.Create(domain.User{
 		ID:           "admin-1",
 		Email:        "admin@rtb-platform.local",
-		PasswordHash: fmt.Sprintf("%x", sha256.Sum256([]byte("admin"))),
+		PasswordHash: fmt.Sprintf("%x", sha256.Sum256([]byte("Admin123!"))),
 		Role:         "admin",
 		CreatedAt:    time.Now(),
 	})
