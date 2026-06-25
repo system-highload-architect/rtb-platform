@@ -1,0 +1,14 @@
+server:
+  port: 9004
+
+jwt:
+  secret: "super-secret-key-change-in-production"
+  access_ttl: 15m
+  refresh_ttl: 72h
+
+log:
+  level: "debug"
+  format: "json"
+
+metrics:
+  use_otlp: false
