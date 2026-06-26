@@ -7,3 +7,6 @@ log:
 
 metrics:
   use_otlp: false
+
+clickhouse:
+  dsn: ""  # localhost:9000

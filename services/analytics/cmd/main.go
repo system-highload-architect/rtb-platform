@@ -13,6 +13,7 @@ import (
 	"rtb-platform/pkg/logger"
 	"rtb-platform/pkg/metrics"
 	"rtb-platform/pkg/shutdown"
+	"rtb-platform/services/analytics/internal/adapters/clickhouse"
 	"rtb-platform/services/analytics/internal/adapters/eventstore"
 	"rtb-platform/services/analytics/internal/domain"
 	"rtb-platform/services/analytics/internal/server"
@@ -21,9 +22,10 @@ import (
 )
 
 type AppConfig struct {
-	Server  ServerConfig  `yaml:"server"`
-	Log     LogConfig     `yaml:"log"`
-	Metrics MetricsConfig `yaml:"metrics"`
+	Server     ServerConfig     `yaml:"server"`
+	Log        LogConfig        `yaml:"log"`
+	Metrics    MetricsConfig    `yaml:"metrics"`
+	ClickHouse ClickHouseConfig `yaml:"clickhouse"`
 }
 
 type ServerConfig struct {
@@ -37,6 +39,10 @@ type LogConfig struct {
 
 type MetricsConfig struct {
 	UseOTLP bool `yaml:"use_otlp"`
+}
+
+type ClickHouseConfig struct {
+	DSN string `yaml:"use_otlp"`
 }
 
 func main() {
@@ -55,7 +61,23 @@ func main() {
 	}
 	defer metrics.Shutdown(context.Background())
 
-	store := eventstore.NewMemoryStore()
+	var store domain.EventStore
+	if cfg.ClickHouse.DSN != "" {
+		ctx := context.Background()
+		chStore, err := clickhouse.NewCHStore(ctx, cfg.ClickHouse.DSN)
+		if err != nil {
+			appLogger.Error("failed to connect to ClickHouse, falling back to memory", "error", err)
+			store = eventstore.NewMemoryStore()
+		} else {
+			store = chStore
+			defer chStore.Close()
+			appLogger.Info("using ClickHouse event store")
+		}
+	} else {
+		store = eventstore.NewMemoryStore()
+		appLogger.Info("using in-memory event store")
+	}
+
 	// Можно заполнить тестовыми событиями для проверки GetReport (опционально)
 	// Генерация тестовых событий за последние 7 дней
 	now := time.Now()

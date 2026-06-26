@@ -30,6 +30,7 @@ import (
 	"rtb-platform/services/auction/internal/adapters/mongodb"
 	"rtb-platform/services/auction/internal/domain"
 	"rtb-platform/services/auction/internal/domain/scoring"
+	"rtb-platform/services/auction/internal/ports"
 	"rtb-platform/services/auction/internal/server"
 
 	as "github.com/aerospike/aerospike-client-go/v7"
@@ -150,9 +151,25 @@ func main() {
 
 	userRepo := aerospike.NewUserRepo(aeroClient, cfg.Aerospike.Namespace, cfg.Aerospike.Set, aeroBreaker)
 
-	// Campaign cache (in-memory)
+	// Campaign cache (in-memory) campaignCache
 	campaignTTL := 24 * time.Hour // чтобы не истекали во время тестов
-	campaignCache := mongodb.NewCachedCampaignRepo(campaignTTL, mongoBreaker)
+	var campaignCache ports.CampaignRepo
+	if cfg.Mongo.URI != "" {
+		ctx := context.Background()
+		mongoRepo, err := mongodb.NewMongoRepo(ctx, cfg.Mongo.URI, cfg.Mongo.DB, mongoBreaker)
+		if err != nil {
+			appLogger.Error("failed to connect to MongoDB, falling back to in-memory cache", "error", err)
+			campaignCache = mongodb.NewCachedCampaignRepo(campaignTTL, mongoBreaker)
+		} else {
+			campaignCache = mongoRepo
+			defer mongoRepo.Close()
+			mongoRepo.StartAutoRefresh(ctx, 5*time.Minute)
+			appLogger.Info("using MongoDB campaign repository")
+		}
+	} else {
+		campaignCache = mongodb.NewCachedCampaignRepo(campaignTTL, mongoBreaker)
+		appLogger.Info("using in-memory campaign cache")
+	}
 
 	// Временная загрузка тестовых кампаний (уберем после реализации MongoDB)
 	testCampaigns := []domain.Campaign{
