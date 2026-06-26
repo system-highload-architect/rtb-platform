@@ -10,3 +10,7 @@ log:
 
 metrics:
   use_otlp: false
+
+kafka:
+  brokers: "kafka:29092"
+  topic: "bid_events"

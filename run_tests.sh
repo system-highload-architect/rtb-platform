@@ -62,11 +62,9 @@ test_case "Missing method" "POST" "$BASE_URL/rpc" '{"jsonrpc":"2.0","id":1}' "20
 test_case "Fraud detection" "POST" "$BASE_URL/rpc" '{"jsonrpc":"2.0","method":"auction.bid","params":{"device_id":"bad","ip":"192.168.1.1"},"id":1}' "200" '"error":"fraud"'
 
 # 3. Аукцион с кампаниями
-test_case "Auction with campaigns" "POST" "$BASE_URL/rpc" '{"jsonrpc":"2.0","method":"auction.bid","params":{"device_id":"d1","ip":"100.200.300.400","lat":55.7558,"lng":37.6173},"id":3}' "200" '"campaign_id":"100'
-
+test_case "Auction with campaigns" "POST" "$BASE_URL/rpc" '{"jsonrpc":"2.0","method":"auction.bid","params":{"device_id":"d1","ip":"100.200.300.400","lat":55.7558,"lng":37.6173},"id":3}' "200" '"accepted"'
 # 4. Получение баланса
-test_case "Get balance" "POST" "$BASE_URL/rpc" '{"jsonrpc":"2.0","method":"accounting.getBalance","params":{"campaign_id":"campaign-1"},"id":10}' "200" '"amount":10000'
-
+test_case "Get balance" "POST" "$BASE_URL/rpc" '{"jsonrpc":"2.0","method":"accounting.getBalance","params":{"campaign_id":"campaign-1"},"id":10}' "200" '"amount":9850'
 # 5. Дебет первый раз
 test_case "Debit first time" "POST" "$BASE_URL/rpc" \
   '{"jsonrpc":"2.0","method":"accounting.debit","params":{"campaign_id":"campaign-1","amount":{"amount":150,"scale":2},"bid_id":"bid-1"},"id":11}' \

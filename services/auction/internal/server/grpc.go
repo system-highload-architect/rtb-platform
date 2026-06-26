@@ -14,6 +14,7 @@ import (
 	"rtb-platform/pkg/geoip"
 	"rtb-platform/pkg/idempotent"
 	"rtb-platform/pkg/sampler"
+	"rtb-platform/pkg/timedcache"
 
 	"rtb-platform/services/auction/internal/domain"
 	"rtb-platform/services/auction/internal/domain/scoring"
@@ -38,6 +39,7 @@ type AuctionServer struct {
 	sampler          *sampler.Sampler
 	experiments      *experiment.Experiments
 	accountingClient ports.AccountingPort
+	auctionCache     *timedcache.Cache[string, []*auctionv1.BidRequest]
 }
 
 func NewAuctionServer(
@@ -73,26 +75,39 @@ func NewAuctionServer(
 }
 
 func (s *AuctionServer) Bid(ctx context.Context, req *auctionv1.BidRequest) (*auctionv1.BidResponse, error) {
-	// Идемпотентность
+	// Асинхронный режим: сразу кладём в кэш и отвечаем "accepted"
+	if s.auctionCache != nil {
+		if req.IdempotencyKey != "" {
+			if !s.idempotent.Check(req.IdempotencyKey) {
+				return nil, status.Error(codes.AlreadyExists, "duplicate request")
+			}
+		}
+		// fraud check ДО кэширования
+		if s.fraud.IsSuspicious(req.Ip, req.DeviceId) {
+			return &auctionv1.BidResponse{Error: "fraud"}, nil
+		}
+		key := "global"
+		existing, _ := s.auctionCache.Get(key)
+		existing = append(existing, req)
+		s.auctionCache.Set(key, existing)
+		return &auctionv1.BidResponse{Error: "accepted"}, nil
+	}
+
+	// Синхронный режим (без кэша) – существующая логика
 	if req.IdempotencyKey != "" {
 		if !s.idempotent.Check(req.IdempotencyKey) {
 			return nil, status.Error(codes.AlreadyExists, "duplicate request")
 		}
 	}
 
-	// Фрод
-	if s.fraud.IsSuspicious(req.Ip, req.DeviceId) {
-		return &auctionv1.BidResponse{Error: "fraud"}, nil
-	}
-
-	// Получаем профиль пользователя
+	// Профиль пользователя
 	userProf, err := s.userRepo.Get(ctx, req.DeviceId)
 	if err != nil {
 		s.log.Error("failed to get user profile", "error", err)
 		return nil, status.Errorf(codes.Internal, "user profile unavailable")
 	}
 
-	// Определение координат (если нет в профиле, используем GeoIP)
+	// Определение координат
 	lat, lng := userProf.Lat, userProf.Lng
 	if lat == 0 && lng == 0 && req.Ip != "" && s.geoipDB != nil {
 		if geoResult, err := s.geoipDB.Lookup(req.Ip); err == nil {
@@ -101,14 +116,13 @@ func (s *AuctionServer) Bid(ctx context.Context, req *auctionv1.BidRequest) (*au
 		}
 	}
 
-	// Определение типа устройства
+	// Тип устройства
 	deviceType := device.UnknownDevice
 	if req.UserAgent != "" {
 		info := device.Parse(req.UserAgent)
 		deviceType = info.Type
 	}
 
-	// Формируем признаки пользователя
 	userFeats := scoring.UserFeatures{
 		Features:   userProf.Features,
 		Lat:        lat,
@@ -116,14 +130,12 @@ func (s *AuctionServer) Bid(ctx context.Context, req *auctionv1.BidRequest) (*au
 		DeviceType: deviceType,
 	}
 
-	// Получаем список кампаний
 	campaigns, err := s.campaignRepo.GetActive(ctx)
 	if err != nil {
 		s.log.Error("failed to get campaigns", "error", err)
 		return nil, status.Errorf(codes.Internal, "campaigns unavailable")
 	}
 
-	// Выбор скорера в зависимости от эксперимента
 	effectiveScorer := s.scorer
 	if s.experiments != nil && s.experiments.IsInExperiment(req.DeviceId, "new_scoring_v2") {
 		if s.altScorer != nil {
@@ -131,7 +143,6 @@ func (s *AuctionServer) Bid(ctx context.Context, req *auctionv1.BidRequest) (*au
 		}
 	}
 
-	// Запуск аукциона
 	result, err := domain.RunAuction(ctx, campaigns, userFeats, s.geoResolver, effectiveScorer)
 	if err != nil {
 		return nil, err
@@ -139,25 +150,18 @@ func (s *AuctionServer) Bid(ctx context.Context, req *auctionv1.BidRequest) (*au
 	if result == nil {
 		return &auctionv1.BidResponse{Error: "no suitable campaign"}, nil
 	}
-	// Списываем бюджет, если есть победитель и accountingClient настроен
-	if result != nil && result.Error == "" && s.accountingClient != nil {
+
+	if s.accountingClient != nil {
 		debitReq := &accountingv1.DebitRequest{
 			CampaignId: strconv.FormatUint(uint64(result.CampaignID), 10),
 			Amount:     &commonv1.Money{Amount: result.BidPrice, Scale: 2},
 			BidId:      req.IdempotencyKey,
 		}
-		debitResp, err := s.accountingClient.Debit(ctx, debitReq)
-		if err != nil || !debitResp.Success {
+		if _, err := s.accountingClient.Debit(ctx, debitReq); err != nil {
 			s.log.Error("failed to debit campaign", "error", err)
-			// TODO:
-			// Если списание не удалось, можно вернуть ошибку или продолжить без списания
-			// Здесь решаем: если бюджет не списался, аукцион всё равно возвращает победителя,
-			// но в реальной системе можно откатить результат.
-			// Пока просто логируем и продолжаем.
 		}
 	}
 
-	// Публикация события с сэмплированием
 	if s.sampler == nil || s.sampler.Sample() {
 		event := domain.BidEvent{
 			BidID:      req.IdempotencyKey,
@@ -176,4 +180,110 @@ func (s *AuctionServer) Bid(ctx context.Context, req *auctionv1.BidRequest) (*au
 		BidPrice:    &commonv1.Money{Amount: result.BidPrice, Scale: 2},
 		CreativeUrl: result.CreativeURL,
 	}, nil
+}
+
+func (s *AuctionServer) SetAuctionCache(c *timedcache.Cache[string, []*auctionv1.BidRequest]) {
+	s.auctionCache = c
+}
+
+func (s *AuctionServer) ProcessBids(ctx context.Context, key string, requests []*auctionv1.BidRequest) {
+	for _, req := range requests {
+		s.processBid(ctx, req)
+	}
+}
+
+// внутренний метод, аналогичен синхронному Bid, но без возврата ответа
+func (s *AuctionServer) processBid(ctx context.Context, req *auctionv1.BidRequest) {
+	// Идемпотентность
+	if req.IdempotencyKey != "" {
+		if !s.idempotent.Check(req.IdempotencyKey) {
+			return
+		}
+	}
+
+	// Фрод
+	if s.fraud.IsSuspicious(req.Ip, req.DeviceId) {
+		return
+	}
+
+	// Профиль пользователя
+	userProf, err := s.userRepo.Get(ctx, req.DeviceId)
+	if err != nil {
+		s.log.Error("failed to get user profile", "error", err)
+		return
+	}
+
+	// Определение координат (GeoIP)
+	lat, lng := userProf.Lat, userProf.Lng
+	if lat == 0 && lng == 0 && req.Ip != "" && s.geoipDB != nil {
+		if geoResult, err := s.geoipDB.Lookup(req.Ip); err == nil {
+			lat = geoResult.Lat
+			lng = geoResult.Lng
+		}
+	}
+
+	// Тип устройства
+	deviceType := device.UnknownDevice
+	if req.UserAgent != "" {
+		info := device.Parse(req.UserAgent)
+		deviceType = info.Type
+	}
+
+	userFeats := scoring.UserFeatures{
+		Features:   userProf.Features,
+		Lat:        lat,
+		Lng:        lng,
+		DeviceType: deviceType,
+	}
+
+	// Кампании
+	campaigns, err := s.campaignRepo.GetActive(ctx)
+	if err != nil {
+		s.log.Error("failed to get campaigns", "error", err)
+		return
+	}
+
+	// Выбор скорера с экспериментом
+	effectiveScorer := s.scorer
+	if s.experiments != nil && s.experiments.IsInExperiment(req.DeviceId, "new_scoring_v2") {
+		if s.altScorer != nil {
+			effectiveScorer = s.altScorer
+		}
+	}
+
+	// Аукцион
+	result, err := domain.RunAuction(ctx, campaigns, userFeats, s.geoResolver, effectiveScorer)
+	if err != nil {
+		s.log.Error("auction failed", "error", err)
+		return
+	}
+	if result == nil {
+		return
+	}
+
+	// Списание бюджета
+	if s.accountingClient != nil {
+		debitReq := &accountingv1.DebitRequest{
+			CampaignId: strconv.FormatUint(uint64(result.CampaignID), 10),
+			Amount:     &commonv1.Money{Amount: result.BidPrice, Scale: 2},
+			BidId:      req.IdempotencyKey,
+		}
+		if _, err := s.accountingClient.Debit(ctx, debitReq); err != nil {
+			s.log.Error("failed to debit campaign", "error", err)
+		}
+	}
+
+	// Публикация события
+	if s.sampler == nil || s.sampler.Sample() {
+		event := domain.BidEvent{
+			BidID:      req.IdempotencyKey,
+			CampaignID: result.CampaignID,
+			DeviceID:   req.DeviceId,
+			PriceCents: result.BidPrice,
+			Win:        true,
+		}
+		if err := s.publisher.PublishBidEvent(ctx, event); err != nil {
+			s.log.Error("failed to publish bid event", "error", err)
+		}
+	}
 }

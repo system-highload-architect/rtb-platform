@@ -21,6 +21,7 @@ import (
 	"rtb-platform/pkg/metrics"
 	"rtb-platform/pkg/sampler"
 	"rtb-platform/pkg/shutdown"
+	"rtb-platform/pkg/timedcache"
 
 	"rtb-platform/services/auction/internal/adapters/aerospike"
 	"rtb-platform/services/auction/internal/adapters/fraud"
@@ -198,8 +199,9 @@ func main() {
 	// Geo resolver (пока заглушка с пустыми координатами)
 	geoResolver := geodata.NewInmemGeoResolver(nil)
 
-	// Publisher (заглушка)
-	publisher := kafka.NewDummyPublisher()
+	// Kafka producer
+	kafkaProducer := kafka.NewProducer([]string{"kafka:29092"}, "bid_events", appLogger)
+	defer kafkaProducer.Close()
 
 	// Основной скорер
 	scorer := scoring.NewPredictiveScorer(
@@ -240,7 +242,7 @@ func main() {
 		geoResolver,
 		scorer,
 		altScorer,
-		publisher,
+		kafkaProducer,
 		idempStore,
 		appLogger,
 		geoipDB,
@@ -249,6 +251,16 @@ func main() {
 		accountingPort,
 	)
 	auctionv1.RegisterAuctionServiceServer(grpcServer, auctionSrv)
+
+	// Асинхронный кэш аукционов
+	auctionCache := timedcache.New[string, []*auctionv1.BidRequest](
+		100*time.Millisecond,
+		timedcache.WithFinalizer[string, []*auctionv1.BidRequest](func(key string, requests []*auctionv1.BidRequest) {
+			auctionSrv.ProcessBids(context.Background(), key, requests)
+		}),
+	)
+	defer auctionCache.Stop()
+	auctionSrv.SetAuctionCache(auctionCache)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.Port))
 	if err != nil {

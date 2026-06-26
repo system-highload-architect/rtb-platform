@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	analyticsv1 "rtb-platform/pb/analytics/v1"
@@ -23,9 +24,15 @@ import (
 
 type AppConfig struct {
 	Server     ServerConfig     `yaml:"server"`
+	ClickHouse ClickHouseConfig `yaml:"clickhouse"`
+	Kafka      KafkaConfig      `yaml:"kafka"`
 	Log        LogConfig        `yaml:"log"`
 	Metrics    MetricsConfig    `yaml:"metrics"`
-	ClickHouse ClickHouseConfig `yaml:"clickhouse"`
+}
+
+type KafkaConfig struct {
+	Brokers string `yaml:"brokers" env:"KAFKA_BROKERS"`
+	Topic   string `yaml:"topic" env:"KAFKA_TOPIC"`
 }
 
 type ServerConfig struct {
@@ -105,6 +112,35 @@ func main() {
 		}
 	}
 	fmt.Println("Inserted test events into store")
+
+	// Kafka consumer (если используется ClickHouse, то подключаем Kafka для наполнения)
+	if cfg.Kafka.Brokers != "" {
+		kafkaStore, ok := store.(*clickhouse.CHStore) // если у нас ClickHouse, то можем пробросить Kafka напрямую
+		if ok {
+			consumer := eventstore.NewKafkaConsumer(
+				strings.Split(cfg.Kafka.Brokers, ","),
+				cfg.Kafka.Topic,
+				"analytics-consumer-group",
+				kafkaStore,
+				appLogger,
+			)
+			consumer.Start(context.Background())
+			defer consumer.Close()
+			appLogger.Info("Kafka consumer started")
+		} else {
+			// fallback: используем MemoryStore или другой store, тоже можно слушать Kafka
+			consumer := eventstore.NewKafkaConsumer(
+				strings.Split(cfg.Kafka.Brokers, ","),
+				cfg.Kafka.Topic,
+				"analytics-consumer-group",
+				store,
+				appLogger,
+			)
+			consumer.Start(context.Background())
+			defer consumer.Close()
+			appLogger.Info("Kafka consumer started (non-ClickHouse store)")
+		}
+	}
 
 	reportSvc := domain.NewReportService(store)
 	forecastSvc := domain.NewForecastService()
