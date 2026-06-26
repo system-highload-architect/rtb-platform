@@ -15,6 +15,7 @@ import (
 	"rtb-platform/pkg/logger"
 	"rtb-platform/pkg/metrics"
 	"rtb-platform/pkg/shutdown"
+	"rtb-platform/services/accounting/internal/adapters/postgres"
 	"rtb-platform/services/accounting/internal/domain"
 	"rtb-platform/services/accounting/internal/server"
 
@@ -23,21 +24,29 @@ import (
 
 type AppConfig struct {
 	Server      ServerConfig      `yaml:"server"`
+	Database    DatabaseConfig    `yaml:"database"`
 	Log         LogConfig         `yaml:"log"`
 	Metrics     MetricsConfig     `yaml:"metrics"`
 	Idempotency IdempotencyConfig `yaml:"idempotency"`
 }
 
+type DatabaseConfig struct {
+	DSN string `yaml:"dsn" env:"DATABASE_DSN"`
+}
+
 type ServerConfig struct {
 	Port int `yaml:"port" env:"SERVER_PORT"`
 }
+
 type LogConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
 }
+
 type MetricsConfig struct {
 	UseOTLP bool `yaml:"use_otlp"`
 }
+
 type IdempotencyConfig struct {
 	TTL time.Duration `yaml:"ttl"`
 }
@@ -59,7 +68,21 @@ func main() {
 	defer metrics.Shutdown(context.Background())
 
 	// In-memory хранилище
-	store := domain.NewInmemStore()
+	var store domain.BalanceStore
+	if cfg.Database.DSN != "" {
+		pgStore, err := postgres.NewPGStore(context.Background(), cfg.Database.DSN)
+		if err != nil {
+			appLogger.Error("failed to connect to postgres, falling back to in-memory", "error", err)
+			store = domain.NewInmemStore()
+		} else {
+			store = pgStore
+			defer pgStore.Close()
+			appLogger.Info("using postgres balance store")
+		}
+	} else {
+		store = domain.NewInmemStore()
+		appLogger.Info("using in-memory balance store")
+	}
 
 	// TODO Добавим тестовые кампании (заглушка)
 	store.Set("campaign-1", fixedpoint.Money(10000)) // 100.00 руб

@@ -1,6 +1,9 @@
 server:
   port: 9002
 
+database:
+  dsn: ""  # оставьте пустым, чтобы использовать in-memory; для Postgres укажите, например, "postgres://user:pass@localhost:5432/rtb?sslmode=disable"
+
 log:
   level: "debug"
   format: "json"
