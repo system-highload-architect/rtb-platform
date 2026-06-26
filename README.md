@@ -1,305 +1,77 @@
-# Справочник пакетов `pkg/`
+# RTB Platform / RTB Платформа
 
-## 1. `pkg/config`
-**Назначение:** загрузка конфигурации из YAML-файла с переопределением через переменные окружения.
+**🇬🇧** High‑load Real‑Time Bidding (RTB) platform with analytics subsystem and dashboard.  
+**🇷🇺** Высоконагруженная система проведения рекламных аукционов в реальном времени (Real‑Time Bidding) с аналитической подсистемой и дашбордом.
 
-**Файлы:** `config.go`, `options.go`, `env.go`
-
-**Ключевые функции:**
-- `Load(cfg interface{}, opts ...Option) error` — загружает конфигурацию в структуру `cfg` (ненулевой указатель). Приоритет: env > YAML.
-- `WithPath(path string) Option` — путь к YAML (по умолчанию `config.yaml`).
-- `WithEnvPrefix(prefix string) Option` — префикс для переменных окружения (по умолчанию `RTB_`).
-- Теги структуры: `yaml:"field"`, `env:"FIELD"`.
+The platform accepts ad display requests, runs an auction among advertising campaigns, debits the winner’s budget, and collects detailed statistics. All components run in Docker containers and communicate via gRPC and Kafka.  
+Платформа принимает запросы на показ рекламы, проводит аукцион среди рекламных кампаний, списывает бюджет победителя и собирает детальную статистику. Все компоненты работают в Docker-контейнерах и взаимодействуют по gRPC и Kafka.
 
 ---
 
-## 2. `pkg/fixedpoint`
-**Назначение:** точная денежная арифметика на базе `int64` (копейки/центы), без `float64`.
+## 🇬🇧 Architecture / 🇷🇺 Архитектура
 
-**Файлы:** `money.go`
+```mermaid
+graph TD
+    Client[SSP / Browser] -->|JSON-RPC / REST| Gateway
+    Gateway -->|gRPC| Auction
+    Gateway -->|gRPC| Accounting
+    Gateway -->|gRPC| Analytics
+    Gateway -->|gRPC| Auth
 
-**Тип:** `Money int64`
+    Auction -->|Debit| Accounting
+    Auction -->|Events| Kafka
+    Auction -->|Profiles| Aerospike
+    Auction -->|Campaigns| MongoDB
 
-**Основные методы:**
-- Конструкторы: `NewFromInt64`, `NewFromFloat64`, `ParseMoney`, `MustParseMoney`.
-- Арифметика: `Add`, `Sub`, `Mul`, `Div`, `MulFloat`.
-- Сравнение: `Cmp`, `IsZero`, `Sign`, `Abs`.
-- Вывод: `String`, `Float64`, `MarshalText`, `UnmarshalText`.
+    Analytics -->|Events| Kafka
+    Analytics -->|Storage| ClickHouse
 
----
+    Accounting -->|Balances| PostgreSQL
+```
 
-## 3. `pkg/zerocopy`
-**Назначение:** инструменты для избежания выделений памяти в горячем пути.
+### 🇬🇧 Core Services / 🇷🇺 Основные сервисы
 
-**Файлы:** `zerocopy.go`
+- **Gateway** – single entry point for external clients. Accepts JSON‑RPC (auction, debit) and REST (analytics, Excel export). Serves the SPA dashboard. Includes rate‑limiting, idempotency, authentication (JWT).  
+  **Gateway** – единая точка входа для внешних клиентов. Принимает JSON‑RPC (аукцион, списание) и REST (аналитика, экспорт Excel). Раздаёт SPA‑дашборд. Включает rate‑limiting, идемпотентность, аутентификацию (JWT).
 
-**Функции:**
-- Пул байтовых буферов: `GetBytes() *[]byte`, `PutBytes(buf *[]byte)`.
-- Конвертация без копирования: `StringToBytes(s string) []byte`, `BytesToString(b []byte) string`.
-- Инлайн-парсинг JSON: `GetJSONField(data []byte, field string) ([]byte, bool)`.
-- Сборка JSON без аллокаций: `AppendJSONString`, `AppendJSONInt`.
+- **Auction** – RTB core. Performs first‑price auction with LSD Radix Sort (O(N)), geo‑targeting, LTV scoring, A/B experiments. Asynchronously processes bids via `timedcache`.  
+  **Auction** – ядро RTB. Выполняет аукцион первой цены с Radix Sort LSD (O(N)), учитывает гео‑таргетинг, LTV, A/B‑эксперименты. Асинхронно обрабатывает запросы через `timedcache`.
 
----
+- **Accounting** – financial service. Stores campaign balances (PostgreSQL), provides `Debit` and `GetBalance` methods with idempotency.  
+  **Accounting** – финансовый сервис. Хранит балансы кампаний (PostgreSQL), предоставляет методы `Debit` и `GetBalance` с идемпотентностью.
 
-## 4. `pkg/backpressure`
-**Назначение:** многопоточный конвейер обработки с обратным давлением на дженериках.
+- **Analytics** – collects and analyses events. Generates reports, forecasts (Holt‑Winters), factor analysis (PCA). Events are consumed from Kafka and stored in ClickHouse.  
+  **Analytics** – сбор и анализ событий. Генерирует отчёты, прогнозы (Хольт‑Уинтерс), факторный анализ (PCA). События поступают через Kafka и сохраняются в ClickHouse.
 
-**Файлы:** `pipeline.go`
+- **Auth** – authentication service. Registration, login, JWT issue and validation.  
+  **Auth** – сервис аутентификации. Регистрация, логин, выпуск и валидация JWT‑токенов.
 
-**Типы и функции:**
-- `type Stage[T any] func(ctx context.Context, item T) error`
-- `NewPipeline[T](ctx, input <-chan T, stages []Stage[T], opts ...Option[T]) *Pipeline[T]`
-- Опции: `WithWorkers[T](workers ...int)`, `WithBufferSize[T](size int)`.
-- `(p *Pipeline[T]) Start() <-chan T` — запускает конвейер, возвращает выходной канал.
-- `(p *Pipeline[T]) Wait()` — ожидает завершения.
+### 🇬🇧 Infrastructure / 🇷🇺 Инфраструктура
 
----
-
-## 5. `pkg/registry`
-**Назначение:** типобезопасный реестр обработчиков (замена switch-case).
-
-**Файлы:** `registry.go`
-
-**Типы и методы:**
-- `type Handler[Req, Resp any] func(ctx context.Context, req Req) (Resp, error)`
-- `type Registry[K comparable, Req, Resp any]`
-- `New[K, Req, Resp]() *Registry[K, Req, Resp]`
-- `Register(key K, h Handler[Req, Resp])`, `Dispatch(ctx, key, req) (Resp, error)`, `Exists(key K) bool`.
+| Component   | Purpose                                      |
+|------------|-------------------------------------------------|
+| PostgreSQL | Accounting balances                            |
+| ClickHouse | Analytics events                               |
+| MongoDB    | Advertising campaigns                          |
+| Aerospike  | User profiles (in‑memory, <1.5 ms)             |
+| Kafka      | Asynchronous event bus between Auction and Analytics |
+| Docker     | Containerisation of all services and databases   |
 
 ---
 
-## 6. `pkg/timedcache`
-**Назначение:** потокобезопасный кэш с фиксированным TTL, упорядоченным списком и точным демоном очистки.
+## 🇬🇧 Quick Start / 🇷🇺 Быстрый старт
 
-**Файлы:** `cache.go`, `daemon.go`, `options.go`
+Launch instructions: [launch.md](launch.md)  
+Инструкция по запуску: [launch.md](launch.md)
 
-**Тип:** `Cache[K comparable, V any]`
+## 🇬🇧 Documentation / 🇷🇺 Документация
 
-**Методы:**
-- `New[K, V](ttl time.Duration, opts ...Option[K, V]) *Cache[K, V]`
-- Опции: `WithFinalizer(fn func(key K, value V))`, `WithFinalizerWorkers(n int)`, `WithFinalizerBuffer(size int)`, `WithNowFunc(fn func() time.Time)`.
-- `Get(key K) (V, bool)`, `Set(key K, value V)`, `Extend(key K) bool`, `Delete(key K)`, `Stop()`, `Values() []V`.
-- Демон засыпает точно до истечения хвоста; при `Get`/`Extend` элемент перемещается в голову.
+- [Navigation / Навигация](docs/navigation.md)
+- Service specifications / Спецификации сервисов: [docs/specification/](docs/specification/)
+- Feature specifications / Технические задания: [docs/srs/](docs/srs/)
 
----
+## 🇬🇧 Tech Stack / 🇷🇺 Стек технологий
 
-## 7. `pkg/statistics`
-**Назначение:** базовые статистические функции.
-
-**Файлы:** `statistics.go`
-
-**Функции:**
-- `Mean`, `Variance`, `StdDev`, `Covariance`, `Correlation`, `Percentile`, `Median`.
-
----
-
-## 8. `pkg/regression`
-**Назначение:** линейная и логистическая регрессия.
-
-**Файлы:** `linear.go`, `logistic.go`
-
-**Типы:**
-- `LinearModel` с методом `Predict(features []float64) float64`.
-- `LogisticModel` с методом `PredictProb(features []float64) float64`.
-- Обучение: `TrainLinear`, `TrainLogistic`.
-
----
-
-## 9. `pkg/factoranalysis`
-**Назначение:** метод главных компонент (PCA) и интерфейс факторного анализа.
-
-**Файлы:** `pca.go`, `factoranalysis.go`
-
-**Типы и методы:**
-- `PCA` с полями `Components`, `ExplainedVariance`, `Mean`.
-- `TrainPCA(X [][]float64, nComponents int) (*PCA, error)`.
-- `(p *PCA) Transform(X) [][]float64`, `InverseTransform(Z) [][]float64`, `ExplainedVarianceRatio() []float64`.
-- Интерфейс `FactorAnalysis`.
-
----
-
-## 10. `pkg/timeseries`
-**Назначение:** прогнозирование временных рядов (Хольт‑Уинтерс).
-
-**Файлы:** `holt_winters.go`
-
-**Тип:** `HoltWintersParams` (поля `Alpha`, `Beta`, `Gamma`, `Period`).
-
-**Функция:** `HoltWintersForecast(data []float64, horizon int, params HoltWintersParams) ([]float64, error)`.
-
----
-
-## 11. `pkg/geospatial`
-**Назначение:** географические вычисления.
-
-**Файлы:** `distance.go`, `geofence.go`
-
-**Тип:** `Point{Lat, Lng float64}`
-
-**Функции:**
-- `HaversineDistance(a, b Point) float64` — расстояние в метрах.
-- `PointInPolygon(pt Point, polygon []Point) bool`.
-
----
-
-## 12. `pkg/valuation`
-**Назначение:** комплексная оценка ценности показа и оптимальной ставки для RTB.
-
-**Файлы:** `ltv.go`, `impression.go`, `geo_factor.go`, `bid_optimizer.go`, `valuation.go`
-
-**Типы и их методы:**
-- `LTVModel` — `NewLTVModel(coeff)`, `Predict(features) float64`.
-- `ImpressionValue` — `NewImpressionValue(...)`, `Value(userFeats, adFeats) float64`.
-- `GeoFactor` — `NewGeoFactor(decayRate, useRoad)`, `Factor(userPos, targetPos) float64`.
-- `WinRateModel` — `NewWinRateModel(...)`, `OptimalBid(value Money) (Money, error)`.
-- `Scorer` — `NewScorer(...)`, `Score(...) (score float64, bid Money, err error)` — агрегирует все факторы.
-
----
-
-## 13. `pkg/ratelimit`
-**Назначение:** защита от DDoS (lock‑free Token Bucket).
-
-**Файлы:** `tokenbucket.go`, `limiter.go`
-
-**Типы:**
-- `TokenBucket` — `NewTokenBucket(rate, burst float64)`, `Allow() bool`.
-- `Limiter` — `NewLimiter(rate, burst float64)`, `Allow(key string) bool`, `Stop()`.
-
----
-
-## 14. `pkg/appsec`
-**Назначение:** инструменты безопасности (OWASP): защита от XSS, валидация, безопасные редиректы, подпись URL.
-
-**Файлы:** `url.go`, `sanitize.go`, `hmac.go`
-
-**Функции:**
-- `SafeRedirect(rawURL string, allowedHosts []string) (string, error)`
-- `SanitizeHTML(input string) string`
-- `ValidID(id string) bool`
-- `ValidNumber(s string) bool`
-- `SignURLParams(baseURL string, params map[string]string, secret []byte) (string, error)`
-- `VerifyURLParams(fullURL string, secret []byte) error`
-
----
-
-## 15. `pkg/idempotent`
-**Назначение:** предотвращение дублирования операций.
-
-**Файлы:** `idempotent.go`
-
-**Тип:** `Store` (на основе `timedcache`)
-
-**Метод:** `NewStore(ttl time.Duration) *Store`, `(s *Store) Check(key string) bool` — возвращает `true` для нового ключа, `false` для дубля.
-
----
-
-## 16. `pkg/radixsort`
-**Назначение:** поразрядная сортировка (LSD) для `int64`, в том числе с перестановкой индексов.
-
-**Файлы:** `lsd.go`, `with_indices.go`
-
-**Функции:**
-- `SortInt64(data []int64)` — сортировка in‑place.
-- `SortInt64WithIndices(data []int64, indices []int)` — синхронная перестановка индексов.
-
----
-
-## 17. `pkg/geoip`
-**Назначение:** in‑memory GeoIP (MaxMind GeoLite2).
-
-**Файлы:** `geoip.go`
-
-**Типы и методы:**
-- `GeoDB` — `New(path string) (*GeoDB, error)`, `Lookup(ipStr string) (Result, error)`, `Close() error`.
-- `Result` содержит `Country`, `City`, `Lat`, `Lng`.
-
----
-
-## 18. `pkg/device`
-**Назначение:** zero‑allocation парсинг User‑Agent.
-
-**Файлы:** `device.go`
-
-**Типы:** `DeviceInfo` с полями `Type`, `OS`, `Browser`.  
-Константы типов: `UnknownDevice`, `Desktop`, `Mobile`, `Tablet`, `Bot`.
-
-**Функция:** `Parse(ua string) DeviceInfo`.
-
----
-
-## 19. `pkg/breaker`
-**Назначение:** Circuit Breaker для внешних вызовов.
-
-**Файлы:** `breaker.go`
-
-**Тип:** `Breaker`
-
-**Методы:**
-- `New(name string, threshold int, timeout time.Duration) *Breaker`
-- `State() State` (Closed/Open/HalfOpen)
-- `Execute(ctx context.Context, fn func() error) error`
-
----
-
-## 20. `pkg/sampler`
-**Назначение:** вероятностный сэмплинг событий.
-
-**Файлы:** `sampler.go`
-
-**Тип:** `Sampler`
-
-**Методы:** `NewSampler(rate float64) *Sampler`, `Sample() bool`.
-
----
-
-## 21. `pkg/experiment`
-**Назначение:** A/B‑флаги для раскатки новых алгоритмов.
-
-**Файлы:** `experiment.go`
-
-**Тип:** `Experiments`
-
-**Методы:** `New(flags map[string]float64) *Experiments`, `IsInExperiment(userID, name string) bool` (детерминированный хэш).
-
----
-
-## 22. `pkg/metrics`
-**Назначение:** метрики на базе OpenTelemetry (счётчики, гистограммы).
-
-**Файлы:** `metrics.go`
-
-**Типы:** `Counter`, `Histogram`.
-
-**Функции:**
-- `Init(ctx, serviceName string, useOTLP bool) error`
-- `Shutdown(ctx context.Context)`
-- `Handler() http.Handler`
-- `NewCounter(name, help string, labels []string) *Counter`, `(c *Counter) Inc(labelVals ...string)`
-- `NewHistogram(name, help string, buckets []float64, labels []string) *Histogram`, `(h *Histogram) Observe(val float64, labelVals ...string)`
-
----
-
-## 23. `pkg/logger`
-**Назначение:** структурированный логгер на базе `log/slog`.
-
-**Файлы:** `logger.go`
-
-**Функция:** `New(level, format string, attrs ...slog.Attr) *slog.Logger`.
-
----
-
-## 24. `pkg/shutdown`
-**Назначение:** безопасное (graceful) завершение сервиса с приоритетами и таймаутами.
-
-**Файлы:** `shutdown.go`
-
-**Тип:** `Manager`
-
-**Методы:**
-- `NewManager(totalTimeout time.Duration) *Manager`
-- `SetLogger(l Logger)`
-- `Add(name string, priority int, fn Closer, timeout time.Duration)`
-- `Shutdown(ctx context.Context) error`
-- `Wait()` — блокируется до SIGINT/SIGTERM, затем вызывает все Closer по приоритету.
-
----
+**Backend**: Go 1.25, gRPC, Protocol Buffers, Kafka, Aerospike, MongoDB, PostgreSQL, ClickHouse.  
+**Frontend**: React, TypeScript, Vite, Tailwind CSS, Recharts.  
+**DevOps**: Docker, Docker Compose, Git.
