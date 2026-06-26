@@ -71,7 +71,7 @@ type MetricsConfig struct {
 func main() {
 	// 1. Загрузка конфигурации
 	var cfg AppConfig
-	if err := config.Load(&cfg, config.WithPath("configs/dev.yaml")); err != nil {
+	if err := config.Load(&cfg, config.WithPath("configs/dev.yaml"), config.WithEnvPrefix("")); err != nil {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
@@ -158,6 +158,7 @@ func main() {
 		server.WithReadTimeout(cfg.Server.ReadTimeout),
 		server.WithWriteTimeout(cfg.Server.WriteTimeout),
 		server.WithIdleTimeout(cfg.Server.IdleTimeout),
+		server.WithStaticDir("web/dist"),
 	)
 
 	srv.Handle("/metrics", metrics.Handler())

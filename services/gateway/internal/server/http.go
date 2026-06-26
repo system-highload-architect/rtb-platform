@@ -6,6 +6,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -36,6 +39,7 @@ type HTTPServer struct {
 	writeTimeout     time.Duration
 	idleTimeout      time.Duration
 	mux              *http.ServeMux
+	staticDir        string
 }
 
 // Option — функциональная опция для конструирования HTTPServer.
@@ -137,6 +141,29 @@ func NewHTTPServer(opts ...Option) *HTTPServer {
 	}
 	if s.idempotentMW != nil {
 		handler = s.idempotentMW.Handler(handler)
+	}
+
+	// Статика и SPA fallback
+	if s.staticDir != "" {
+		fs := http.FileServer(http.Dir(s.staticDir))
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			// Если запрос начинается с /api, /rpc, /export, /metrics – не трогаем (они уже зарегистрированы выше)
+			if strings.HasPrefix(r.URL.Path, "/api") ||
+				strings.HasPrefix(r.URL.Path, "/rpc") ||
+				strings.HasPrefix(r.URL.Path, "/export") ||
+				strings.HasPrefix(r.URL.Path, "/metrics") {
+				http.NotFound(w, r)
+				return
+			}
+			// Пробуем отдать файл
+			path := filepath.Join(s.staticDir, r.URL.Path)
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				// SPA fallback
+				http.ServeFile(w, r, filepath.Join(s.staticDir, "index.html"))
+				return
+			}
+			fs.ServeHTTP(w, r)
+		})
 	}
 
 	s.server = &http.Server{
@@ -313,4 +340,8 @@ func (s *HTTPServer) writeJSONRPCErrorZeroCopy(w http.ResponseWriter, code int, 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(buf)
+}
+
+func WithStaticDir(dir string) Option {
+	return func(s *HTTPServer) { s.staticDir = dir }
 }

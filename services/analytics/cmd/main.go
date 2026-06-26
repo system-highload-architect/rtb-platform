@@ -47,7 +47,7 @@ type ClickHouseConfig struct {
 
 func main() {
 	var cfg AppConfig
-	if err := config.Load(&cfg, config.WithPath("configs/dev.yaml")); err != nil {
+	if err := config.Load(&cfg, config.WithPath("configs/dev.yaml"), config.WithEnvPrefix("")); err != nil {
 		slog.Error("cannot load config", "error", err)
 		os.Exit(1)
 	}
@@ -78,12 +78,13 @@ func main() {
 		appLogger.Info("using in-memory event store")
 	}
 
-	// Можно заполнить тестовыми событиями для проверки GetReport (опционально)
-	// Генерация тестовых событий за последние 7 дней
+	// Генерация тестовых событий для ClickHouse (если используется ClickHouse)
+	// Генерация тестовых событий (для любого хранилища)
+	// Генерация тестовых событий
 	now := time.Now()
 	for daysAgo := 7; daysAgo >= 0; daysAgo-- {
 		eventDate := now.AddDate(0, 0, -daysAgo)
-		for hour := 0; hour < 24; hour += 6 { // 4 события в день
+		for hour := 0; hour < 24; hour += 6 {
 			for _, camp := range []uint32{1001, 1002} {
 				price := int64(150)
 				if camp == 1002 {
@@ -103,6 +104,7 @@ func main() {
 			}
 		}
 	}
+	fmt.Println("Inserted test events into store")
 
 	reportSvc := domain.NewReportService(store)
 	forecastSvc := domain.NewForecastService()

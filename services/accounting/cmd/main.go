@@ -53,7 +53,7 @@ type IdempotencyConfig struct {
 
 func main() {
 	var cfg AppConfig
-	if err := config.Load(&cfg, config.WithPath("configs/dev.yaml")); err != nil {
+	if err := config.Load(&cfg, config.WithPath("configs/dev.yaml"), config.WithEnvPrefix("")); err != nil {
 		slog.Error("cannot load config", "error", err)
 		os.Exit(1)
 	}

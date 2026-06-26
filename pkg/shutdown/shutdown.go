@@ -80,7 +80,7 @@ func (m *Manager) Add(name string, priority int, fn Closer, timeout time.Duratio
 // Возвращает ошибку, если какой-то компонент не успел завершиться за отведённое время.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.mu.Lock()
-	closers := make([]namedCloser, len(m.closers)) // исправлено m.mclosers → m.closers
+	closers := make([]namedCloser, len(m.closers))
 	copy(closers, m.closers)
 	m.mu.Unlock()
 
