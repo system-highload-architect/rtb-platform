@@ -77,3 +77,4 @@ graph TD
     Register --> Login
     Dashboard --> Auction
     Auction --> Dashboard
+```
